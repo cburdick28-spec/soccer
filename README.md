@@ -10,13 +10,14 @@ A browser-based football management career sim — build a club, manage a squad,
 
 ## Features
 
-- Procedurally generated 16-team league, squads, and player attributes each new career
-- Season-long fixture schedule (double round robin), simulated matchday by matchday
-- Statistical match engine (attack/defense ratings → Poisson-based scoring, goal events, injuries, fitness)
-- Squad management: attributes, condition, contracts, transfer listing
-- Tactics: formation selection (4-4-2, 4-3-3, 3-5-2, 4-2-3-1) and starting XI / bench selection
-- Transfer market: buy free agents or bid for AI club players; receive and respond to incoming offers
-- End-of-season rollover: player aging, attribute development toward potential, retirements, contract renewals/releases, new fixture list for the next season
+- **4-tier league pyramid**: 64 procedurally generated clubs (16 per division), ~1,400+ players, with 3-up/3-down promotion & relegation each season
+- Granular player positions (GK/CB/LB/RB/DM/CM/AM/LW/RW/ST), attributes, match form, and season stats
+- Minute-by-minute match engine with live xG, tactical mentality modifiers (Defensive/Balanced/Attacking), shot coordinates on a spatial pitch grid, cards, fouls, and injuries
+- **Match Center**: event ticker, shot map, and live stat meters + cumulative xG chart for every match
+- Squad management: attributes, condition, contracts, match form, transfer listing
+- Tactics: formation (4-4-2, 4-3-3, 3-5-2, 4-2-3-1) + mentality, starting XI / bench selection
+- Asynchronous multi-stage transfer negotiations: AI valuation & counter-offers, personal terms (wage/signing bonus/squad status), and proactive AI bids for your players
+- End-of-season rollover: aging, attribute development toward potential, retirements, 16-year-old youth regens, contract renewals/releases, promotion/relegation, new fixtures for all divisions
 - Multiple save slots, all stored locally in your browser
 
 ## Getting started

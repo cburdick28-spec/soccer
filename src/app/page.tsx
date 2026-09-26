@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useGameStore } from "@/lib/game/store";
 import { suggestedClubNames } from "@/lib/game/init";
+import { divisionName } from "@/lib/game/divisions";
 
 export default function Home() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function Home() {
   const [saveName, setSaveName] = useState("My Career");
   const [clubOptions, setClubOptions] = useState<string[]>([]);
   const [club, setClub] = useState("");
+  const [division, setDivision] = useState(4);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export default function Home() {
 
   function startCareer() {
     if (!managerName.trim() || !club) return;
-    const id = newCareer(saveName.trim() || "My Career", managerName.trim(), club);
+    const id = newCareer(saveName.trim() || "My Career", managerName.trim(), club, division);
     loadCareer(id);
     router.push("/dashboard");
   }
@@ -96,6 +98,24 @@ export default function Home() {
             onChange={(e) => setSaveName(e.target.value)}
             className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 outline-none focus:border-emerald-500"
           />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm text-slate-400">Starting division</label>
+          <div className="grid grid-cols-4 gap-2">
+            {[1, 2, 3, 4].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDivision(d)}
+                className={`px-2 py-2 rounded-md border text-xs transition ${
+                  division === d ? "border-emerald-500 bg-emerald-500/10 text-emerald-300" : "border-slate-700 text-slate-300 hover:border-slate-500"
+                }`}
+              >
+                {divisionName(d)}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500">A 4-tier pyramid with promotion &amp; relegation. Start at the bottom for the full climb, or higher up for an easier ride.</p>
         </div>
 
         <div className="space-y-1">

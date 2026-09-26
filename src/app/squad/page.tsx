@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useActiveCareer } from "@/lib/game/useActiveCareer";
 import { useGameStore } from "@/lib/game/store";
-import { playerOverall } from "@/lib/game/ratings";
 import { formatMoney } from "@/lib/game/format";
 import { Player } from "@/lib/game/types";
 
@@ -16,9 +15,9 @@ export default function SquadPage() {
     if (!career) return [];
     const players = Object.values(career.players).filter((p) => p.teamId === career.userTeamId);
     return players.sort((a, b) => {
-      if (sortKey === "overall") return playerOverall(b) - playerOverall(a);
+      if (sortKey === "overall") return b.currentRating - a.currentRating;
       if (sortKey === "age") return a.age - b.age;
-      if (sortKey === "value") return b.value - a.value;
+      if (sortKey === "value") return b.marketValue - a.marketValue;
       return a.position.localeCompare(b.position);
     });
   }, [career, sortKey]);
@@ -41,7 +40,7 @@ export default function SquadPage() {
         </select>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-800/50 text-slate-400 text-xs uppercase">
             <tr>
@@ -49,6 +48,8 @@ export default function SquadPage() {
               <th className="px-2 py-2">Pos</th>
               <th className="px-2 py-2">Age</th>
               <th className="px-2 py-2">OVR</th>
+              <th className="px-2 py-2">POT</th>
+              <th className="px-2 py-2">Form</th>
               <th className="px-2 py-2">Condition</th>
               <th className="px-2 py-2">Status</th>
               <th className="px-2 py-2">Contract</th>
@@ -69,13 +70,17 @@ export default function SquadPage() {
 }
 
 function PlayerRow({ player, onToggleList }: { player: Player; onToggleList: (listed: boolean) => void }) {
-  const ovr = playerOverall(player);
+  const avgForm = player.matchForm.length ? player.matchForm.reduce((s, f) => s + f, 0) / player.matchForm.length : null;
   return (
     <tr className="border-t border-slate-800 hover:bg-slate-800/30">
-      <td className="px-3 py-2 font-medium">{player.name}</td>
+      <td className="px-3 py-2 font-medium whitespace-nowrap">
+        {player.name} {player.isRegen && <span className="text-emerald-500 text-xs">YTH</span>}
+      </td>
       <td className="px-2 py-2 text-center text-slate-400">{player.position}</td>
       <td className="px-2 py-2 text-center">{player.age}</td>
-      <td className="px-2 py-2 text-center font-bold text-emerald-400">{ovr}</td>
+      <td className="px-2 py-2 text-center font-bold text-emerald-400">{player.currentRating}</td>
+      <td className="px-2 py-2 text-center text-slate-500">{player.potentialRating}</td>
+      <td className="px-2 py-2 text-center text-slate-300">{avgForm ? avgForm.toFixed(1) : "—"}</td>
       <td className="px-2 py-2 text-center">
         <div className="w-16 h-2 bg-slate-800 rounded-full mx-auto overflow-hidden">
           <div
@@ -85,14 +90,14 @@ function PlayerRow({ player, onToggleList }: { player: Player; onToggleList: (li
         </div>
       </td>
       <td className="px-2 py-2 text-center text-xs">
-        {player.injuryWeeksLeft > 0 ? (
-          <span className="text-red-400">Injured ({player.injuryWeeksLeft}w)</span>
+        {player.injuryWeeks > 0 ? (
+          <span className="text-red-400">Injured ({player.injuryWeeks}w)</span>
         ) : (
           <span className="text-slate-500">Fit</span>
         )}
       </td>
-      <td className="px-2 py-2 text-center text-slate-400">{player.contractYearsLeft}y</td>
-      <td className="px-2 py-2 text-center text-slate-300">{formatMoney(player.value)}</td>
+      <td className="px-2 py-2 text-center text-slate-400">{player.contractYears}y</td>
+      <td className="px-2 py-2 text-center text-slate-300">{formatMoney(player.marketValue)}</td>
       <td className="px-2 py-2 text-center text-slate-300">{formatMoney(player.wage)}</td>
       <td className="px-2 py-2 text-center">
         <input

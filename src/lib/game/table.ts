@@ -1,12 +1,13 @@
 import { Fixture, TableRow } from "./types";
 
-export function computeTable(teamIds: string[], fixtures: Fixture[], season: number): TableRow[] {
+export function computeTable(teamIds: string[], fixtures: Fixture[], season: number, divisionId?: number): TableRow[] {
   const rows: Record<string, TableRow> = {};
   for (const id of teamIds) {
     rows[id] = { teamId: id, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0 };
   }
   for (const f of fixtures) {
     if (f.season !== season || !f.played) continue;
+    if (divisionId !== undefined && f.divisionId !== divisionId) continue;
     const home = rows[f.homeTeamId];
     const away = rows[f.awayTeamId];
     if (!home || !away) continue;

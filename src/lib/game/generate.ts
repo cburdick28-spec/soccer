@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import {
   CITY_NAMES, CITY_PARTS, CLUB_SUFFIXES, FIRST_NAMES, LAST_NAMES, NATIONALITIES,
 } from "./names";
-import { Attributes, Formation, LineupSlot, Player, Position, Team } from "./types";
+import { Attributes, Formation, LineupSlot, Mentality, Player, Position, SeasonStats, Team } from "./types";
 import { estimateValue, estimateWage, overallFor } from "./ratings";
 
 function pick<T>(arr: T[]): T {
@@ -26,8 +26,10 @@ export function generateTeamNames(count: number): string[] {
   const names = new Set<string>();
   const cities = shuffle(CITY_NAMES);
   let idx = 0;
-  while (names.size < count) {
-    const usePart = Math.random() < 0.3;
+  let guard = 0;
+  while (names.size < count && guard < count * 20) {
+    guard++;
+    const usePart = Math.random() < 0.4 || idx >= cities.length;
     const city = cities[idx % cities.length];
     const full = usePart ? `${pick(CITY_PARTS)} ${city}` : city;
     const name = `${full} ${pick(CLUB_SUFFIXES)}`;
@@ -40,11 +42,13 @@ export function generateTeamNames(count: number): string[] {
 const POSITION_POOL: { position: Position; weight: number }[] = [
   { position: "GK", weight: 2 },
   { position: "CB", weight: 4 },
-  { position: "FB", weight: 4 },
+  { position: "LB", weight: 2 },
+  { position: "RB", weight: 2 },
   { position: "DM", weight: 2 },
   { position: "CM", weight: 4 },
   { position: "AM", weight: 2 },
-  { position: "WG", weight: 3 },
+  { position: "LW", weight: 1.5 },
+  { position: "RW", weight: 1.5 },
   { position: "ST", weight: 3 },
 ];
 
@@ -59,7 +63,6 @@ function weightedPosition(): Position {
 }
 
 function baseAttributesFor(position: Position, skillLevel: number): Attributes {
-  // skillLevel roughly 40-90, drives the mean of all attributes with position-specific bias.
   const n = () => Math.round(skillLevel + randInt(-10, 10));
   const boost = (base: number, amt: number) => Math.max(20, Math.min(95, base + amt));
   const a: Attributes = {
@@ -78,7 +81,8 @@ function baseAttributesFor(position: Position, skillLevel: number): Attributes {
       a.pace = boost(a.pace, -5);
       a.shooting = boost(a.shooting, -10);
       break;
-    case "FB":
+    case "LB":
+    case "RB":
       a.defending = boost(a.defending, randInt(2, 8));
       a.pace = boost(a.pace, randInt(2, 10));
       break;
@@ -95,7 +99,8 @@ function baseAttributesFor(position: Position, skillLevel: number): Attributes {
       a.dribbling = boost(a.dribbling, randInt(3, 10));
       a.shooting = boost(a.shooting, randInt(0, 8));
       break;
-    case "WG":
+    case "LW":
+    case "RW":
       a.pace = boost(a.pace, randInt(4, 12));
       a.dribbling = boost(a.dribbling, randInt(4, 12));
       break;
@@ -110,18 +115,21 @@ function baseAttributesFor(position: Position, skillLevel: number): Attributes {
   return a;
 }
 
-export function generatePlayer(teamStrength: number, forcePosition?: Position): Player {
+export function generatePlayer(teamStrength: number, forcePosition?: Position, isRegen = false): Player {
   const position = forcePosition ?? weightedPosition();
-  const age = randInt(17, 34);
-  const skillLevel = Math.max(35, Math.min(88, teamStrength + randInt(-8, 8)));
+  const age = isRegen ? 16 : randInt(17, 34);
+  const skillLevel = Math.max(30, Math.min(88, teamStrength + randInt(-8, 8) - (isRegen ? randInt(10, 20) : 0)));
   const attributes = baseAttributesFor(position, skillLevel);
   const overall = overallFor(position, attributes);
-  const youthBonus = age < 23 ? randInt(3, 20) : age < 27 ? randInt(0, 8) : 0;
+  const youthBonus = age < 23 ? randInt(3, 22) : age < 27 ? randInt(0, 8) : 0;
   const potential = Math.max(overall, Math.min(94, overall + youthBonus - (age > 29 ? 5 : 0)));
   const secondary: Position[] = [];
-  if (position === "FB" && Math.random() < 0.3) secondary.push("CB");
-  if (position === "WG" && Math.random() < 0.3) secondary.push("ST");
+  if (position === "LB" && Math.random() < 0.3) secondary.push("CB");
+  if (position === "RB" && Math.random() < 0.3) secondary.push("CB");
+  if (position === "LW" && Math.random() < 0.3) secondary.push("ST");
+  if (position === "RW" && Math.random() < 0.3) secondary.push("ST");
   if (position === "CM" && Math.random() < 0.3) secondary.push(Math.random() < 0.5 ? "DM" : "AM");
+
   return {
     id: nanoid(10),
     name: `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`,
@@ -130,25 +138,29 @@ export function generatePlayer(teamStrength: number, forcePosition?: Position): 
     position,
     secondaryPositions: secondary,
     attributes,
-    potential,
+    currentRating: overall,
+    potentialRating: potential,
     condition: 100,
     morale: randInt(60, 90),
-    injuryWeeksLeft: 0,
+    injuryWeeks: 0,
     teamId: null,
-    contractYearsLeft: randInt(1, 4),
+    contractYears: isRegen ? randInt(2, 4) : randInt(1, 4),
     wage: estimateWage(overall, age),
-    value: estimateValue(overall, age, potential),
+    marketValue: estimateValue(overall, age, potential),
+    matchForm: [],
+    seasonStats: [],
     history: [],
+    isRegen,
   };
 }
 
 const SQUAD_TEMPLATE: Position[] = [
   "GK", "GK",
-  "CB", "CB", "CB", "FB", "FB",
+  "CB", "CB", "CB", "LB", "RB",
   "DM", "CM", "CM", "AM",
-  "WG", "WG", "ST", "ST",
+  "LW", "RW", "ST", "ST",
   // depth
-  "CB", "FB", "CM", "WG", "ST",
+  "CB", "LB", "RB", "CM", "LW", "RW", "ST",
 ];
 
 export function generateSquad(teamStrength: number): Player[] {
@@ -157,15 +169,20 @@ export function generateSquad(teamStrength: number): Player[] {
 
 export function defaultLineupForFormation(formation: Formation): LineupSlot[] {
   const templates: Record<Formation, Position[]> = {
-    "4-4-2": ["GK", "FB", "CB", "CB", "FB", "WG", "CM", "CM", "WG", "ST", "ST"],
-    "4-3-3": ["GK", "FB", "CB", "CB", "FB", "CM", "CM", "AM", "WG", "ST", "WG"],
-    "3-5-2": ["GK", "CB", "CB", "CB", "FB", "CM", "CM", "CM", "FB", "ST", "ST"],
-    "4-2-3-1": ["GK", "FB", "CB", "CB", "FB", "DM", "DM", "AM", "WG", "WG", "ST"],
+    "4-4-2": ["GK", "LB", "CB", "CB", "RB", "LW", "CM", "CM", "RW", "ST", "ST"],
+    "4-3-3": ["GK", "LB", "CB", "CB", "RB", "CM", "CM", "AM", "LW", "ST", "RW"],
+    "3-5-2": ["GK", "CB", "CB", "CB", "LB", "CM", "CM", "CM", "RB", "ST", "ST"],
+    "4-2-3-1": ["GK", "LB", "CB", "CB", "RB", "DM", "DM", "AM", "LW", "RW", "ST"],
   };
   return templates[formation].map((slot) => ({ slot, playerId: null }));
 }
 
-export function generateTeam(name: string, isUserTeam: boolean, reputation: number): { team: Team; players: Player[] } {
+export function generateTeam(
+  name: string,
+  isUserTeam: boolean,
+  reputation: number,
+  divisionId: number
+): { team: Team; players: Player[] } {
   const short = name.split(" ").slice(0, 2).join(" ").slice(0, 12);
   const players = generateSquad(reputation);
   const team: Team = {
@@ -175,9 +192,11 @@ export function generateTeam(name: string, isUserTeam: boolean, reputation: numb
     primaryColor: pick(["#1d4ed8", "#b91c1c", "#15803d", "#7c3aed", "#c2410c", "#0e7490", "#4d7c0f", "#a21caf", "#0f172a", "#be123c"]),
     secondaryColor: "#ffffff",
     reputation,
-    transferBudget: Math.round(reputation * randInt(8000, 15000) / 1000) * 1000,
-    wageBudget: Math.round(reputation * randInt(400, 700) / 10) * 10,
+    divisionId,
+    transferBudget: Math.round((reputation * randInt(8000, 15000)) / 1000) * 1000,
+    wageBudget: Math.round((reputation * randInt(400, 700)) / 10) * 10,
     formation: "4-3-3",
+    mentality: "Balanced",
     lineup: defaultLineupForFormation("4-3-3"),
     subs: [],
     isUserTeam,

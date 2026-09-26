@@ -2,35 +2,41 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Career, Formation, LineupSlot } from "./types";
+import { Career, Formation, Mentality } from "./types";
 import { createNewCareer } from "./init";
-import { simulateMatch, applyResultToFixture } from "./matchEngine";
+import { simulateMatch, applyResultToFixture, MatchResult } from "./matchEngine";
 import { autoLineup } from "./lineup";
 import { defaultLineupForFormation } from "./generate";
 import { isSeasonComplete, rolloverSeason } from "./season";
-import { generateIncomingOffers, makeBuyOffer, listPlayerForTransfer, respondToOffer } from "./transfers";
-import { nanoid } from "nanoid";
+import {
+  submitBid, respondToOutgoingOffer, respondToIncomingOffer, listPlayerForTransfer,
+  processWeeklyTransferActivity,
+} from "./transfers";
+
+const SAVE_VERSION = 2;
 
 interface GameState {
   careers: Record<string, Career>;
   activeCareerId: string | null;
-  lastMatchSummary: { fixtureId: string; text: string[] } | null;
+  lastMatchResult: { fixtureId: string; result: MatchResult; homeName: string; awayName: string } | null;
 
-  newCareer: (saveName: string, managerName: string, clubName: string) => string;
+  newCareer: (saveName: string, managerName: string, clubName: string, division?: number) => string;
   loadCareer: (id: string) => void;
   deleteCareer: (id: string) => void;
   exitToMenu: () => void;
 
   setFormation: (formation: Formation) => void;
+  setMentality: (mentality: Mentality) => void;
   setLineupSlot: (index: number, playerId: string | null) => void;
   autoPickLineup: () => void;
 
   playNextMatchday: () => void;
   advanceSeasonIfComplete: () => void;
 
-  buyPlayer: (playerId: string, amount: number) => { result: "accepted" | "rejected"; message: string };
+  submitTransferBid: (playerId: string, amount: number) => void;
+  respondOutgoing: (offerId: string, action: "accept" | "reject" | "raise", raiseAmount?: number) => void;
+  respondIncoming: (offerId: string, action: "accept" | "reject" | "counter", counterAmount?: number) => void;
   toggleListPlayer: (playerId: string, listed: boolean) => void;
-  respondToIncomingOffer: (offerId: string, accept: boolean) => void;
 }
 
 function withCareer(state: GameState, fn: (c: Career) => Career): Partial<GameState> {
@@ -46,10 +52,10 @@ export const useGameStore = create<GameState>()(
     (set, get) => ({
       careers: {},
       activeCareerId: null,
-      lastMatchSummary: null,
+      lastMatchResult: null,
 
-      newCareer: (saveName, managerName, clubName) => {
-        const career = createNewCareer(saveName, managerName, clubName);
+      newCareer: (saveName, managerName, clubName, division = 4) => {
+        const career = createNewCareer(saveName, managerName, clubName, division);
         set((state) => ({
           careers: { ...state.careers, [career.id]: career },
           activeCareerId: career.id,
@@ -71,12 +77,17 @@ export const useGameStore = create<GameState>()(
           withCareer(state, (c) => {
             const team = c.teams[c.userTeamId];
             const newLineup = defaultLineupForFormation(formation);
-            // try to keep already-assigned players in equivalent slots where possible
             const oldIds = team.lineup.map((s) => s.playerId).filter(Boolean) as string[];
-            newLineup.forEach((slot, i) => {
-              slot.playerId = oldIds[i] ?? null;
-            });
+            newLineup.forEach((slot, i) => { slot.playerId = oldIds[i] ?? null; });
             return { ...c, teams: { ...c.teams, [c.userTeamId]: { ...team, formation, lineup: newLineup } } };
+          })
+        ),
+
+      setMentality: (mentality) =>
+        set((state) =>
+          withCareer(state, (c) => {
+            const team = c.teams[c.userTeamId];
+            return { ...c, teams: { ...c.teams, [c.userTeamId]: { ...team, mentality } } };
           })
         ),
 
@@ -103,18 +114,19 @@ export const useGameStore = create<GameState>()(
         set((state) =>
           withCareer(state, (c) => {
             const md = c.matchday;
-            const todays = c.fixtures.filter((f) => f.season === c.season && f.matchday === md && !f.played);
+            const userTeam = c.teams[c.userTeamId];
+            const todays = c.fixtures.filter(
+              (f) => f.season === c.season && f.divisionId === userTeam.divisionId && f.matchday === md && !f.played
+            );
             let fixtures = [...c.fixtures];
             let players = { ...c.players };
             let teams = { ...c.teams };
-            const summaryLines: string[] = [];
-            let userFixtureId = "";
+            let lastMatchResult: GameState["lastMatchResult"] = null;
 
             for (const fixture of todays) {
               const home = teams[fixture.homeTeamId];
               const away = teams[fixture.awayTeamId];
               if (!home || !away) continue;
-              // refresh AI lineups each week to account for injuries/condition
               if (!home.isUserTeam) {
                 const squad = Object.values(players).filter((p) => p.teamId === home.id);
                 const picked = autoLineup(home, squad);
@@ -130,45 +142,59 @@ export const useGameStore = create<GameState>()(
               fixtures[idx] = applyResultToFixture(fixture, result);
 
               if (home.isUserTeam || away.isUserTeam) {
-                userFixtureId = fixture.id;
-                summaryLines.push(`${home.name} ${result.homeGoals} - ${result.awayGoals} ${away.name}`);
-                for (const ev of result.events) summaryLines.push(`${ev.minute}' ${ev.text}`);
+                lastMatchResult = { fixtureId: fixture.id, result, homeName: home.name, awayName: away.name };
               }
 
               for (const [pid, delta] of Object.entries(result.conditionDelta)) {
                 const p = players[pid];
                 if (p) players[pid] = { ...p, condition: Math.max(10, Math.min(100, p.condition + delta)) };
               }
+              for (const [pid, rating] of Object.entries(result.formDelta)) {
+                const p = players[pid];
+                if (p) players[pid] = { ...p, matchForm: [...p.matchForm.slice(-4), rating] };
+              }
               for (const inj of result.injuries) {
                 const p = players[inj.playerId];
-                if (p) players[inj.playerId] = { ...p, injuryWeeksLeft: Math.max(p.injuryWeeksLeft, inj.weeks) };
+                if (p) players[inj.playerId] = { ...p, injuryWeeks: Math.max(p.injuryWeeks, inj.weeks) };
               }
             }
 
-            // weekly recovery for everyone not involved + injury countdown
+            // All other divisions also play out their matchday so tables stay in sync.
+            const otherDivisionFixtures = c.fixtures.filter(
+              (f) => f.season === c.season && f.divisionId !== userTeam.divisionId && f.matchday === md && !f.played
+            );
+            for (const fixture of otherDivisionFixtures) {
+              const home = teams[fixture.homeTeamId];
+              const away = teams[fixture.awayTeamId];
+              if (!home || !away) continue;
+              const hs = Object.values(players).filter((p) => p.teamId === home.id);
+              const as = Object.values(players).filter((p) => p.teamId === away.id);
+              teams[home.id] = { ...home, ...autoLineup(home, hs) };
+              teams[away.id] = { ...away, ...autoLineup(away, as) };
+              const result = simulateMatch(teams[home.id], teams[away.id], players);
+              const idx = fixtures.findIndex((f) => f.id === fixture.id);
+              fixtures[idx] = applyResultToFixture(fixture, result);
+              for (const [pid, delta] of Object.entries(result.conditionDelta)) {
+                const p = players[pid];
+                if (p) players[pid] = { ...p, condition: Math.max(10, Math.min(100, p.condition + delta)) };
+              }
+            }
+
+            // weekly recovery + injury countdown for everyone
             for (const id of Object.keys(players)) {
               const p = players[id];
               players[id] = {
                 ...p,
-                injuryWeeksLeft: Math.max(0, p.injuryWeeksLeft - 1),
+                injuryWeeks: Math.max(0, p.injuryWeeks - 1),
                 condition: Math.min(100, p.condition + 4),
               };
             }
 
-            let career: Career = {
-              ...c,
-              fixtures,
-              players,
-              teams,
-              matchday: md + 1,
-              news: userFixtureId
-                ? [...c.news, { id: nanoid(8), season: c.season, matchday: md, text: summaryLines[0] }]
-                : c.news,
-            };
-            career = generateIncomingOffers(career);
+            let career: Career = { ...c, fixtures, players, teams, matchday: md + 1 };
+            career = processWeeklyTransferActivity(career);
 
             queueMicrotask(() => {
-              useGameStore.setState({ lastMatchSummary: userFixtureId ? { fixtureId: userFixtureId, text: summaryLines } : null });
+              useGameStore.setState({ lastMatchResult });
             });
 
             return career;
@@ -185,23 +211,28 @@ export const useGameStore = create<GameState>()(
           return { careers: { ...state.careers, [career.id]: career } };
         }),
 
-      buyPlayer: (playerId, amount) => {
-        const state = get();
-        if (!state.activeCareerId) return { result: "rejected", message: "No active career." };
-        const c = state.careers[state.activeCareerId];
-        const { career, result, message } = makeBuyOffer(c, playerId, amount);
-        if (result === "accepted") {
-          set((s) => ({ careers: { ...s.careers, [career.id]: career } }));
-        }
-        return { result, message };
-      },
+      submitTransferBid: (playerId, amount) =>
+        set((state) => withCareer(state, (c) => submitBid(c, playerId, amount))),
+
+      respondOutgoing: (offerId, action, raiseAmount) =>
+        set((state) => withCareer(state, (c) => respondToOutgoingOffer(c, offerId, action, raiseAmount))),
+
+      respondIncoming: (offerId, action, counterAmount) =>
+        set((state) => withCareer(state, (c) => respondToIncomingOffer(c, offerId, action, counterAmount))),
 
       toggleListPlayer: (playerId, listed) =>
         set((state) => withCareer(state, (c) => listPlayerForTransfer(c, playerId, listed))),
-
-      respondToIncomingOffer: (offerId, accept) =>
-        set((state) => withCareer(state, (c) => respondToOffer(c, offerId, accept))),
     }),
-    { name: "soccer-career-saves" }
+    {
+      name: "soccer-career-saves",
+      version: SAVE_VERSION,
+      migrate: (persisted) => {
+        // Any save from before the v2 pyramid rewrite is incompatible — start fresh.
+        const state = persisted as { careers?: Record<string, Career> } | undefined;
+        const hasV2 = state?.careers && Object.values(state.careers).every((c) => c.version === SAVE_VERSION);
+        if (hasV2) return state as GameState;
+        return { careers: {}, activeCareerId: null, lastMatchResult: null } as unknown as GameState;
+      },
+    }
   )
 );

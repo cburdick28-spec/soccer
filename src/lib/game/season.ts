@@ -1,19 +1,20 @@
 import { nanoid } from "nanoid";
-import { Career, Player, TableRow } from "./types";
-import { estimateValue, estimateWage, playerOverall } from "./ratings";
+import { Career, DivisionHistoryEntry, Player, SeasonHistoryEntry, Team } from "./types";
+import { estimateValue, estimateWage, overallFor, playerOverall } from "./ratings";
 import { computeTable } from "./table";
-import { generateDoubleRoundRobin } from "./schedule";
+import { generatePyramidFixtures } from "./schedule";
 import { generatePlayer } from "./generate";
 import { autoLineup } from "./lineup";
+import { DIVISION_COUNT, PROMOTE_RELEGATE_COUNT, teamIdsInDivision } from "./divisions";
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-// Grow/decline attributes toward potential, then age up, then handle contracts.
+// Grow/decline attributes toward potential, then age up.
 export function developPlayer(p: Player): Player {
   const overall = playerOverall(p);
-  const growthRoom = p.potential - overall;
+  const growthRoom = p.potentialRating - overall;
   const keys = Object.keys(p.attributes) as (keyof typeof p.attributes)[];
   const next = { ...p.attributes };
 
@@ -27,15 +28,16 @@ export function developPlayer(p: Player): Player {
   }
 
   const age = p.age + 1;
-  const newOverall = playerOverall({ ...p, attributes: next });
+  const newOverall = overallFor(p.position, next);
   return {
     ...p,
     attributes: next,
+    currentRating: newOverall,
     age,
-    value: estimateValue(newOverall, age, p.potential),
-    wage: p.wage, // wage stays until renewal
-    contractYearsLeft: Math.max(0, p.contractYearsLeft - 1),
+    marketValue: estimateValue(newOverall, age, p.potentialRating),
+    contractYears: Math.max(0, p.contractYears - 1),
     condition: 100,
+    matchForm: [],
     morale: clamp(p.morale + Math.round(Math.random() * 10 - 5), 20, 100),
   };
 }
@@ -44,22 +46,54 @@ export interface SeasonRolloverResult {
   career: Career;
   releasedPlayerIds: string[];
   retiredPlayerIds: string[];
+  regenPlayerIds: string[];
+  promotions: Record<number, string[]>;
+  relegations: Record<number, string[]>;
 }
 
 export function rolloverSeason(career: Career): SeasonRolloverResult {
-  const table = computeTable(Object.keys(career.teams), career.fixtures, career.season);
-  const champion = career.teams[table[0]?.teamId]?.name ?? "Unknown";
-  const userRow = table.findIndex((r) => r.teamId === career.userTeamId);
-  const history = [...career.seasonHistory, {
+  const divisionHistories: DivisionHistoryEntry[] = [];
+  const promotions: Record<number, string[]> = {};
+  const relegations: Record<number, string[]> = {};
+  let userDivisionFinish = 0;
+  let userDivision = career.teams[career.userTeamId].divisionId;
+
+  for (let d = 1; d <= DIVISION_COUNT; d++) {
+    const teamIds = teamIdsInDivision(career, d);
+    const table = computeTable(teamIds, career.fixtures, career.season, d);
+    const champion = career.teams[table[0]?.teamId]?.name ?? "Unknown";
+    const promoted = d > 1 ? table.slice(0, PROMOTE_RELEGATE_COUNT).map((r) => r.teamId) : [];
+    const relegated = d < DIVISION_COUNT ? table.slice(-PROMOTE_RELEGATE_COUNT).map((r) => r.teamId) : [];
+    promotions[d] = promoted;
+    relegations[d] = relegated;
+    divisionHistories.push({ divisionId: d, table, champion, promoted, relegated });
+    if (d === userDivision) {
+      userDivisionFinish = table.findIndex((r) => r.teamId === career.userTeamId) + 1;
+    }
+  }
+
+  const history: SeasonHistoryEntry = {
     season: career.season,
-    table,
-    champion,
-    userFinish: userRow + 1,
-  }];
+    divisions: divisionHistories,
+    userDivision,
+    userFinish: userDivisionFinish,
+  };
+
+  // Apply promotion/relegation swaps: teams promoted from d move to d-1, relegated from d move to d+1.
+  const teams = { ...career.teams };
+  for (let d = 1; d <= DIVISION_COUNT; d++) {
+    for (const id of promotions[d] ?? []) {
+      if (d > 1) teams[id] = { ...teams[id], divisionId: d - 1 };
+    }
+    for (const id of relegations[d] ?? []) {
+      if (d < DIVISION_COUNT) teams[id] = { ...teams[id], divisionId: d + 1 };
+    }
+  }
 
   const players = { ...career.players };
   const released: string[] = [];
   const retired: string[] = [];
+  const regens: string[] = [];
 
   for (const id of Object.keys(players)) {
     let p = players[id];
@@ -67,18 +101,16 @@ export function rolloverSeason(career: Career): SeasonRolloverResult {
 
     if (p.age >= 36 && Math.random() < 0.35) {
       retired.push(id);
-      p = { ...p, teamId: null };
       delete players[id];
       continue;
     }
 
-    if (p.contractYearsLeft <= 0) {
+    if (p.contractYears <= 0) {
       if (p.teamId === career.userTeamId) {
-        // leave for the user to decide via UI; give a short grace contract for now
-        p.contractYearsLeft = 1;
+        p.contractYears = 1; // grace period; user decides via Squad UI
       } else if (Math.random() < 0.55) {
-        p.contractYearsLeft = 1 + Math.floor(Math.random() * 3);
-        p.wage = estimateWage(playerOverall(p), p.age);
+        p.contractYears = 1 + Math.floor(Math.random() * 3);
+        p.wage = estimateWage(p.currentRating, p.age);
       } else {
         released.push(id);
         p.teamId = null;
@@ -87,8 +119,18 @@ export function rolloverSeason(career: Career): SeasonRolloverResult {
     players[id] = p;
   }
 
-  // Replenish free agent pool with a few fresh young players each season.
+  // Youth regens: each club has a chance of producing a 16-year-old academy prospect.
   const freeAgentIds = [...released];
+  for (const tid of Object.keys(teams)) {
+    if (Math.random() < 0.4) {
+      const team = teams[tid];
+      const regen = generatePlayer(team.reputation, undefined, true);
+      regen.teamId = tid;
+      players[regen.id] = regen;
+      regens.push(regen.id);
+    }
+  }
+  // Replenish free agent pool with a few extra prospects each season.
   for (let i = 0; i < 6; i++) {
     const fresh = generatePlayer(55 + Math.round(Math.random() * 20));
     players[fresh.id] = fresh;
@@ -96,20 +138,25 @@ export function rolloverSeason(career: Career): SeasonRolloverResult {
   }
 
   const nextSeason = career.season + 1;
-  const teamIds = Object.keys(career.teams);
-  const fixtures = generateDoubleRoundRobin(teamIds, nextSeason);
+  const divisionTeamIds: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] };
+  for (const t of Object.values(teams)) divisionTeamIds[t.divisionId]?.push(t.id);
+  const fixtures = generatePyramidFixtures(divisionTeamIds, nextSeason);
 
-  const teams = { ...career.teams };
-  for (const tid of teamIds) {
+  for (const tid of Object.keys(teams)) {
     const squad = Object.values(players).filter((p) => p.teamId === tid);
     const { lineup, subs } = autoLineup(teams[tid], squad);
     teams[tid] = { ...teams[tid], lineup, subs, transferBudget: teams[tid].transferBudget + Math.round(teams[tid].reputation * 4000) };
   }
 
+  const promotedNames = (promotions[userDivision] ?? []).map((id) => career.teams[id]?.name);
+  const relegatedNames = (relegations[userDivision] ?? []).map((id) => career.teams[id]?.name);
+  const newUserDivision = teams[career.userTeamId].divisionId;
   const news = [
     ...career.news,
-    { id: nanoid(8), season: career.season, matchday: 999, text: `Season ${career.season} ends. ${champion} are champions!` },
-    { id: nanoid(8), season: nextSeason, matchday: 0, text: `Season ${nextSeason} begins.` },
+    { id: nanoid(8), season: career.season, matchday: 999, text: `Season ${career.season} ends.` },
+    ...(promotedNames.length ? [{ id: nanoid(8), season: career.season, matchday: 999, text: `Promoted from Division ${userDivision}: ${promotedNames.join(", ")}` }] : []),
+    ...(relegatedNames.length ? [{ id: nanoid(8), season: career.season, matchday: 999, text: `Relegated from Division ${userDivision}: ${relegatedNames.join(", ")}` }] : []),
+    { id: nanoid(8), season: nextSeason, matchday: 0, text: `Season ${nextSeason} begins. ${teams[career.userTeamId].name} play in Division ${newUserDivision}.` },
   ];
 
   return {
@@ -121,12 +168,15 @@ export function rolloverSeason(career: Career): SeasonRolloverResult {
       teams,
       fixtures,
       freeAgentIds: Array.from(new Set([...career.freeAgentIds.filter((id) => players[id]), ...freeAgentIds])),
-      transferOffers: [],
-      seasonHistory: history,
+      transferOffers: career.transferOffers.filter((o) => o.stage !== "Completed" && o.stage !== "Rejected"),
+      seasonHistory: [...career.seasonHistory, history],
       news,
     },
     releasedPlayerIds: released,
     retiredPlayerIds: retired,
+    regenPlayerIds: regens,
+    promotions,
+    relegations,
   };
 }
 
@@ -134,6 +184,7 @@ export function isSeasonComplete(career: Career): boolean {
   return career.fixtures.filter((f) => f.season === career.season).every((f) => f.played);
 }
 
-export function currentTable(career: Career): TableRow[] {
-  return computeTable(Object.keys(career.teams), career.fixtures, career.season);
+export function currentTable(career: Career, divisionId?: number): import("./types").TableRow[] {
+  const div = divisionId ?? career.teams[career.userTeamId].divisionId;
+  return computeTable(teamIdsInDivision(career, div), career.fixtures, career.season, div);
 }

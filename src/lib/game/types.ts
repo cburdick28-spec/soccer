@@ -1,6 +1,6 @@
 // Core data model for the career-mode football sim.
 
-export type Position = "GK" | "CB" | "FB" | "DM" | "CM" | "AM" | "WG" | "ST";
+export type Position = "GK" | "CB" | "LB" | "RB" | "DM" | "CM" | "AM" | "LW" | "RW" | "ST";
 
 export interface Attributes {
   pace: number;
@@ -12,6 +12,18 @@ export interface Attributes {
   goalkeeping: number;
 }
 
+export interface SeasonStats {
+  season: number;
+  apps: number;
+  goals: number;
+  assists: number;
+  cleanSheets: number;
+  xG: number;
+  avgRating: number;
+}
+
+export type SquadStatus = "Star Player" | "Important" | "Rotation" | "Prospect";
+
 export interface Player {
   id: string;
   name: string;
@@ -20,17 +32,23 @@ export interface Player {
   position: Position;
   secondaryPositions: Position[];
   attributes: Attributes;
-  potential: number; // 0-99 ceiling for overall growth
+  currentRating: number; // derived overall, cached each time attributes change
+  potentialRating: number; // 0-99 ceiling for overall growth
   condition: number; // 0-100 current fitness
   morale: number; // 0-100
-  injuryWeeksLeft: number; // 0 = fit
+  injuryWeeks: number; // 0 = fit
   teamId: string | null; // null = free agent
-  contractYearsLeft: number;
+  contractYears: number;
   wage: number; // per season
-  value: number; // market value
+  marketValue: number;
+  matchForm: number[]; // last 5 match ratings (0-10), most recent last
+  seasonStats: SeasonStats[];
   history: { season: number; apps: number; goals: number; assists: number }[];
   listedForTransfer?: boolean;
+  isRegen?: boolean;
 }
+
+export type Mentality = "Defensive" | "Balanced" | "Attacking";
 
 export interface Team {
   id: string;
@@ -39,9 +57,11 @@ export interface Team {
   primaryColor: string;
   secondaryColor: string;
   reputation: number; // 0-100, affects AI transfer ambition/wage budget
+  divisionId: number; // 1 (top) to 4 (bottom)
   transferBudget: number;
   wageBudget: number;
   formation: Formation;
+  mentality: Mentality;
   lineup: LineupSlot[]; // starting XI assignment for this team's next match
   subs: string[]; // bench player ids, in priority order
   isUserTeam: boolean;
@@ -54,16 +74,36 @@ export interface LineupSlot {
   playerId: string | null;
 }
 
+export interface Coordinate {
+  x: number; // 0-100, along the pitch length (0 = home team's own goal line)
+  y: number; // 0-100, across the pitch width
+}
+
+export type MatchEventType = "shot" | "goal" | "card" | "injury" | "foul" | "note";
+
 export interface MatchEvent {
   minute: number;
-  type: "goal" | "injury" | "card" | "note";
+  type: MatchEventType;
   teamId: string;
   playerId?: string;
   text: string;
+  coordinate?: Coordinate;
+  xg?: number;
+  onTarget?: boolean;
+  cardType?: "yellow" | "red";
+}
+
+export interface LiveMatchStats {
+  possession: [number, number]; // [home, away] percentage
+  shots: [number, number];
+  shotsOnTarget: [number, number];
+  fouls: [number, number];
+  cumulativeXg: [number, number][]; // one entry per minute: [homeXg, awayXg] running totals
 }
 
 export interface Fixture {
   id: string;
+  divisionId: number;
   season: number;
   matchday: number;
   homeTeamId: string;
@@ -72,6 +112,7 @@ export interface Fixture {
   homeGoals: number;
   awayGoals: number;
   events: MatchEvent[];
+  stats?: LiveMatchStats;
 }
 
 export interface TableRow {
@@ -86,15 +127,31 @@ export interface TableRow {
   points: number;
 }
 
+// --- Transfers: asynchronous, multi-stage negotiation lifecycle ---
+
+export type TransferStage =
+  | "Pending_AI_Review"
+  | "Countered"
+  | "Accepted"
+  | "Rejected"
+  | "Contract_Negotiation"
+  | "Completed";
+
 export interface TransferOffer {
   id: string;
   playerId: string;
   fromTeamId: string | null; // null when buying from free agents
-  toTeamId: string;
+  toTeamId: string; // club acquiring the player
   amount: number;
-  wage: number;
-  status: "pending" | "accepted" | "rejected";
+  counterAmount?: number;
+  wage?: number;
+  signOnFee?: number;
+  squadStatusDemanded?: SquadStatus;
+  stage: TransferStage;
   direction: "incoming" | "outgoing"; // relative to user team
+  createdSeason: number;
+  createdMatchday: number;
+  log: string[]; // human-readable negotiation history
 }
 
 export interface NewsItem {
@@ -104,10 +161,18 @@ export interface NewsItem {
   text: string;
 }
 
-export interface SeasonHistoryEntry {
-  season: number;
+export interface DivisionHistoryEntry {
+  divisionId: number;
   table: TableRow[];
   champion: string;
+  promoted: string[];
+  relegated: string[];
+}
+
+export interface SeasonHistoryEntry {
+  season: number;
+  divisions: DivisionHistoryEntry[];
+  userDivision: number;
   userFinish: number;
 }
 
@@ -127,4 +192,5 @@ export interface Career {
   news: NewsItem[];
   seasonHistory: SeasonHistoryEntry[];
   finances: { balance: number };
+  version: 2;
 }

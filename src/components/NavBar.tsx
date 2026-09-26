@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/fixtures", label: "Fixtures" },
   { href: "/table", label: "Table" },
   { href: "/transfers", label: "Transfers" },
+  { href: "/match", label: "Match Center" },
 ];
 
 export default function NavBar() {
@@ -50,7 +51,7 @@ export default function NavBar() {
           ))}
         </nav>
         <div className="text-xs text-slate-400 text-right shrink-0">
-          <div className="font-semibold text-slate-200">{team?.name}</div>
+          <div className="font-semibold text-slate-200">{team?.name} · Div {team?.divisionId}</div>
           <div>Season {career.season} · Matchday {career.matchday}</div>
         </div>
       </div>

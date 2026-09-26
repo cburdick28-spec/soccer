@@ -3,15 +3,16 @@
 import { useMemo } from "react";
 import { useActiveCareer } from "@/lib/game/useActiveCareer";
 import { useGameStore } from "@/lib/game/store";
-import { Formation } from "@/lib/game/types";
+import { Formation, Mentality } from "@/lib/game/types";
 import { effectiveRating, isCompatible } from "@/lib/game/lineup";
-import { playerOverall } from "@/lib/game/ratings";
 
 const FORMATIONS: Formation[] = ["4-4-2", "4-3-3", "3-5-2", "4-2-3-1"];
+const MENTALITIES: Mentality[] = ["Defensive", "Balanced", "Attacking"];
 
 export default function TacticsPage() {
   const { career, hydrated } = useActiveCareer();
   const setFormation = useGameStore((s) => s.setFormation);
+  const setMentality = useGameStore((s) => s.setMentality);
   const setLineupSlot = useGameStore((s) => s.setLineupSlot);
   const autoPickLineup = useGameStore((s) => s.autoPickLineup);
 
@@ -45,6 +46,14 @@ export default function TacticsPage() {
           >
             {FORMATIONS.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
+          <span className="text-sm text-slate-400">Mentality:</span>
+          <select
+            value={team.mentality}
+            onChange={(e) => setMentality(e.target.value as Mentality)}
+            className="bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm"
+          >
+            {MENTALITIES.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
           <button
             onClick={() => autoPickLineup()}
             className="px-3 py-1.5 rounded-md bg-slate-800 text-sm hover:bg-slate-700"
@@ -77,13 +86,13 @@ export default function TacticsPage() {
                 {eligible.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} ({p.position}) — {effectiveRating(p, slot.slot)}
-                    {p.injuryWeeksLeft > 0 ? " [INJ]" : ""}
+                    {p.injuryWeeks > 0 ? " [INJ]" : ""}
                   </option>
                 ))}
               </select>
               {current && (
                 <span className={`text-xs ${isCompatible(current.position, slot.slot) ? "text-emerald-400" : "text-amber-400"}`}>
-                  OVR {playerOverall(current)}
+                  OVR {current.currentRating}
                 </span>
               )}
             </div>
