@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useGameStore } from "@/lib/game/store";
-import { suggestedClubNames } from "@/lib/game/init";
+import { suggestedClubNames, realClubNames } from "@/lib/game/init";
 import { divisionName } from "@/lib/game/divisions";
 
 export default function Home() {
@@ -26,9 +26,12 @@ export default function Home() {
     setClubOptions(suggestedClubNames());
   }, []);
 
+  const clubChoices = division === 1 ? realClubNames() : clubOptions;
+
   useEffect(() => {
-    if (clubOptions.length && !club) setClub(clubOptions[0]);
-  }, [clubOptions, club]);
+    if (clubChoices.length) setClub(clubChoices[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [division, clubOptions.length]);
 
   function startCareer() {
     if (!managerName.trim() || !club) return;
@@ -115,13 +118,17 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-500">A 4-tier pyramid with promotion &amp; relegation. Start at the bottom for the full climb, or higher up for an easier ride.</p>
+          <p className="text-xs text-slate-500">
+            {division === 1
+              ? "Division 1 is the real Premier League — pick a real club to manage from day one."
+              : "A 4-tier pyramid with promotion & relegation. Climb from the fictional lower divisions into the real Premier League, or start higher up for an easier ride."}
+          </p>
         </div>
 
         <div className="space-y-1">
           <label className="text-sm text-slate-400">Choose your club</label>
           <div className="grid grid-cols-2 gap-2 max-h-56 overflow-auto pr-1">
-            {clubOptions.map((name) => (
+            {clubChoices.map((name) => (
               <button
                 key={name}
                 onClick={() => setClub(name)}
@@ -135,12 +142,14 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <button
-            onClick={() => setClubOptions(suggestedClubNames())}
-            className="text-xs text-slate-500 hover:text-slate-300 underline"
-          >
-            Shuffle club names
-          </button>
+          {division !== 1 && (
+            <button
+              onClick={() => setClubOptions(suggestedClubNames())}
+              className="text-xs text-slate-500 hover:text-slate-300 underline"
+            >
+              Shuffle club names
+            </button>
+          )}
         </div>
 
         <button

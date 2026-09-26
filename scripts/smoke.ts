@@ -6,6 +6,18 @@ import { processWeeklyTransferActivity, submitBid, respondToOutgoingOffer } from
 import { Career } from "../src/lib/game/types";
 import { divisionName } from "../src/lib/game/divisions";
 
+// Quick check: starting as a real Premier League club works too.
+{
+  const realCareer = createNewCareer("Real Club Test", "Test Manager", "Arsenal", 1);
+  const userTeam = realCareer.teams[realCareer.userTeamId];
+  if (userTeam.name !== "Arsenal") throw new Error(`Expected Arsenal, got ${userTeam.name}`);
+  const squadSize = Object.values(realCareer.players).filter((p) => p.teamId === userTeam.id).length;
+  console.log(`Real-club start OK: ${userTeam.name} (Div ${userTeam.divisionId}), squad size ${squadSize}, sample player: ${Object.values(realCareer.players).find((p) => p.teamId === userTeam.id)?.name}`);
+  const divCounts: Record<number, number> = {};
+  for (const t of Object.values(realCareer.teams)) divCounts[t.divisionId] = (divCounts[t.divisionId] ?? 0) + 1;
+  console.log("Division sizes:", divCounts);
+}
+
 let career: Career = createNewCareer("Smoke Test", "Test Manager", "Highford United", 4);
 console.log("Teams:", Object.keys(career.teams).length, "Players:", Object.keys(career.players).length);
 console.log("Fixtures season 1:", career.fixtures.filter((f) => f.season === 1).length);
@@ -86,10 +98,11 @@ for (let season = 1; season <= 6; season++) {
   console.log("  Promotions:", Object.entries(promotions).map(([d, ids]) => `D${d}:${ids.length}`).join(" "));
   console.log("  Relegations:", Object.entries(relegations).map(([d, ids]) => `D${d}:${ids.length}`).join(" "));
 
-  // division sizes must stay at 16 each after swaps
+  // division sizes must stay constant after swaps (Div1=20 real PL, Div2-4=16 each)
+  const expectedSizes: Record<number, number> = { 1: 20, 2: 16, 3: 16, 4: 16 };
   for (let d = 1; d <= 4; d++) {
     const count = Object.values(nextCareer.teams).filter((t) => t.divisionId === d).length;
-    if (count !== 16) throw new Error(`Division ${d} has ${count} teams after rollover, expected 16`);
+    if (count !== expectedSizes[d]) throw new Error(`Division ${d} has ${count} teams after rollover, expected ${expectedSizes[d]}`);
   }
 
   career = nextCareer;

@@ -4,6 +4,7 @@ import {
 } from "./names";
 import { Attributes, Formation, LineupSlot, Mentality, Player, Position, SeasonStats, Team } from "./types";
 import { estimateValue, estimateWage, overallFor } from "./ratings";
+import { SeedClub, SeedPlayer } from "./realData/premierLeague";
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -195,6 +196,86 @@ export function generateTeam(
     divisionId,
     transferBudget: Math.round((reputation * randInt(8000, 15000)) / 1000) * 1000,
     wageBudget: Math.round((reputation * randInt(400, 700)) / 10) * 10,
+    formation: "4-3-3",
+    mentality: "Balanced",
+    lineup: defaultLineupForFormation("4-3-3"),
+    subs: [],
+    isUserTeam,
+  };
+  players.forEach((p) => (p.teamId = team.id));
+  return { team, players };
+}
+
+// --- Real-world seeded clubs (e.g. Premier League) ---
+
+const TIER_SKILL: Record<number, number> = { 1: 58, 2: 65, 3: 72, 4: 80, 5: 88 };
+
+export function generateSeededPlayer(seed: SeedPlayer): Player {
+  const skillLevel = Math.max(35, Math.min(92, (TIER_SKILL[seed.tier] ?? 68) + randInt(-4, 4)));
+  const attributes = baseAttributesFor(seed.position, skillLevel);
+  const overall = overallFor(seed.position, attributes);
+  const youthBonus = seed.age < 23 ? randInt(3, 18) : seed.age < 27 ? randInt(0, 6) : 0;
+  const potential = Math.max(overall, Math.min(96, overall + youthBonus - (seed.age > 29 ? 4 : 0)));
+  return {
+    id: nanoid(10),
+    name: seed.name,
+    age: seed.age,
+    nationality: seed.nationality,
+    position: seed.position,
+    secondaryPositions: [],
+    attributes,
+    currentRating: overall,
+    potentialRating: potential,
+    condition: 100,
+    morale: randInt(65, 90),
+    injuryWeeks: 0,
+    teamId: null,
+    contractYears: randInt(2, 5),
+    wage: estimateWage(overall, seed.age),
+    marketValue: estimateValue(overall, seed.age, potential),
+    matchForm: [],
+    seasonStats: [],
+    history: [],
+  };
+}
+
+// Minimum squad composition to guarantee every formation can be filled + a bench.
+const DEPTH_TEMPLATE: Position[] = [
+  "GK", "GK", "CB", "CB", "CB", "LB", "RB", "DM", "CM", "CM", "AM", "LW", "RW", "ST", "ST",
+  "CB", "LB", "RB", "CM", "ST",
+];
+
+export function generateTeamFromSeed(
+  seed: SeedClub,
+  isUserTeam: boolean,
+  divisionId: number,
+  reputation: number
+): { team: Team; players: Player[] } {
+  const players = seed.players.map((sp) => generateSeededPlayer(sp));
+
+  // Pad out squad depth with procedurally generated players so every formation
+  // and bench can always be filled, without diluting the real headline names.
+  const have: Record<string, number> = {};
+  for (const p of players) have[p.position] = (have[p.position] ?? 0) + 1;
+  const needed: Record<string, number> = {};
+  for (const pos of DEPTH_TEMPLATE) needed[pos] = (needed[pos] ?? 0) + 1;
+  for (const pos of Object.keys(needed) as Position[]) {
+    const shortfall = needed[pos] - (have[pos] ?? 0);
+    for (let i = 0; i < shortfall; i++) {
+      players.push(generatePlayer(Math.max(45, reputation - 15), pos));
+    }
+  }
+
+  const team: Team = {
+    id: nanoid(10),
+    name: seed.name,
+    shortName: seed.shortName,
+    primaryColor: seed.primaryColor,
+    secondaryColor: seed.secondaryColor,
+    reputation,
+    divisionId,
+    transferBudget: Math.round((reputation * randInt(12000, 22000)) / 1000) * 1000,
+    wageBudget: Math.round((reputation * randInt(600, 1000)) / 10) * 10,
     formation: "4-3-3",
     mentality: "Balanced",
     lineup: defaultLineupForFormation("4-3-3"),

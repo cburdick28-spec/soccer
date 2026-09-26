@@ -10,7 +10,8 @@ A browser-based football management career sim — build a club, manage a squad,
 
 ## Features
 
-- **4-tier league pyramid**: 64 procedurally generated clubs (16 per division), ~1,400+ players, with 3-up/3-down promotion & relegation each season
+- **Real Premier League as Division 1**: 20 real clubs with real player names/nationalities/ages (good-faith approximation as of this project's last update — transfers happen constantly, so treat rosters as a realistic starting point rather than a live feed). Team colors are real; crest/kit graphics are deliberately not reproduced (protected trademarks, unlike names which are just facts)
+- **Fictional pyramid below it**: Divisions 2-4 are 16 procedurally generated clubs each (~1,300+ players), all feeding into the real Premier League via promotion & relegation
 - Granular player positions (GK/CB/LB/RB/DM/CM/AM/LW/RW/ST), attributes, match form, and season stats
 - Minute-by-minute match engine with live xG, tactical mentality modifiers (Defensive/Balanced/Attacking), shot coordinates on a spatial pitch grid, cards, fouls, and injuries
 - **Match Center**: event ticker, shot map, and live stat meters + cumulative xG chart for every match
